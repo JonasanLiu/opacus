@@ -27,6 +27,7 @@ from opacus.utils.module_utils import (
     trainable_modules,
     trainable_parameters,
 )
+from .functorch import prepare_layer, compute_per_sample_gradient
 
 
 logger = logging.getLogger(__name__)
@@ -219,20 +220,22 @@ class GradSampleModule(nn.Module):
             self.autograd_grad_sample_hooks = self._module.autograd_grad_sample_hooks
 
         for _module_name, module in trainable_modules(self._module):
-            if type(module) in self.GRAD_SAMPLERS:
-                self.autograd_grad_sample_hooks.append(
-                    module.register_forward_hook(self.capture_activations_hook)
-                )
+            if not type(module) in self.GRAD_SAMPLERS: 
+                prepare_layer(module)
+            self.autograd_grad_sample_hooks.append(
+                module.register_forward_hook(self.capture_activations_hook)
+            )
 
-                self.autograd_grad_sample_hooks.append(
-                    module.register_backward_hook(
-                        partial(
-                            self.capture_backprops_hook,
-                            loss_reduction=loss_reduction,
-                            batch_first=batch_first,
-                        )
+            self.autograd_grad_sample_hooks.append(
+                module.register_backward_hook(
+                    partial(
+                        self.capture_backprops_hook,
+                        loss_reduction=loss_reduction,
+                        batch_first=batch_first,
                     )
                 )
+            )
+
         self.enable_hooks()
 
     def remove_hooks(self) -> None:
@@ -352,7 +355,11 @@ class GradSampleModule(nn.Module):
             loss_reduction=loss_reduction,
             batch_first=batch_first,
         )
-        grad_sampler_fn = self.GRAD_SAMPLERS[type(module)]
+        if type(module) in self.GRAD_SAMPLERS:
+            grad_sampler_fn = self.GRAD_SAMPLERS[type(module)]
+        else:
+            grad_sampler_fn = compute_per_sample_gradient
+
         grad_samples = grad_sampler_fn(module, activations, backprops)
         for param, gs in grad_samples.items():
             create_or_accumulate_grad_sample(
@@ -444,9 +451,10 @@ class GradSampleModule(nn.Module):
         Returns:
             ``True`` if grad sampler is found, ``False`` otherwise
         """
-        return type(module) in cls.GRAD_SAMPLERS or isinstance(
-            module, (DPRNNBase, DPRNNCellBase)
-        )
+        return True
+        # return type(module) in cls.GRAD_SAMPLERS or isinstance(
+        #     module, (DPRNNBase, DPRNNCellBase)
+        # )
 
     @classmethod
     def validate(

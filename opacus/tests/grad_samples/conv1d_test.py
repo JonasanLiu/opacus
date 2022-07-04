@@ -21,6 +21,7 @@ import torch.nn as nn
 from hypothesis import given, settings
 
 from .common import GradSampleHooks_test, expander, shrinker
+from opacus.grad_sample import GradSampleModule
 
 
 class Conv1d_test(GradSampleHooks_test):
@@ -48,7 +49,8 @@ class Conv1d_test(GradSampleHooks_test):
         dilation: int,
         groups: int,
     ):
-
+        if nn.Conv1d in GradSampleModule.GRAD_SAMPLERS:
+            del GradSampleModule.GRAD_SAMPLERS[nn.Conv1d]
         out_channels = out_channels_mapper(C)
         if (
             C % groups != 0 or out_channels % groups != 0
